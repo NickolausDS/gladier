@@ -51,7 +51,6 @@ def wait_batch(fxc, batch_id):
     tasks = fxc.get_batch_status(batch_id)
 
     for task in tasks:
-        print(tasks[task])
         while tasks[task]['pending']:
             time.sleep(3)
             tasks = fxc.get_batch_status(batch_id)
@@ -87,7 +86,7 @@ def plot(df, output="ints.png"):
     table = df.pivot('Y', 'X', 'Ints')
     ax = sb.heatmap(table, annot=True, fmt='d', linewidths=0.5, cmap="Blues")
     ax.invert_yaxis()
-    plt.savefig(output)
+    plt.savefig(output, bbox_inches='tight', dpi=100)
 
 
 def main():
@@ -108,13 +107,10 @@ def main():
         beamx = float(config['beamx'])
         beamy = float(config['beamy'])
         endpoint = config['endpoint']
-        endpoint_local = config['endpoint_local']
 
     x_values = np.round(np.arange(beamx - span_half, beamx + span_half + delta, delta), decimals=significant_digits)
     y_values = np.round(np.arange(beamy - span_half, beamy + span_half + delta, delta), decimals=significant_digits)
-
-    phil_data = list()
-    phil_data2 = list()
+    json_data_list = list()
 
     for x in x_values:
         for y in y_values:
@@ -122,7 +118,7 @@ def main():
             new_config['beamx'] = x
             new_config['beamy'] = y
             new_config['suffix'] = get_random_str()
-            phil_data.append(new_config)
+            json_data_list.append(new_config)
 
     fxc = FuncXClient()
     fxc.throttling_enabled = False
@@ -131,16 +127,16 @@ def main():
     # Phil files
     print("Running funcx_create_phil")
     phil_batch = fxc.create_batch()
-    for phil in phil_data:
-        phil_batch.add(phil, endpoint_id=endpoint_local, function_id=fxid_create_phil)
+    for json_data in json_data_list:
+        phil_batch.add(json_data, endpoint_id=endpoint, function_id=fxid_create_phil)
     phil_job = fxc.batch_run(phil_batch)
     wait_batch(fxc, phil_job)
 
     # Stills process
     print("\nRunning funcx_stills_process")
     stills_batch = fxc.create_batch()
-    for phil in phil_data:
-        stills_batch.add(phil, endpoint_id=endpoint, function_id=fxid_stills_process)
+    for json_data in json_data_list:
+        stills_batch.add(json_data, endpoint_id=endpoint, function_id=fxid_stills_process)
     stills_job = fxc.batch_run(stills_batch)
     wait_batch(fxc, stills_job)
 
@@ -148,8 +144,8 @@ def main():
     print("\nRunning funcx_count_ints")
     combined_df = pd.DataFrame()
     count_batch = fxc.create_batch()
-    for phil in phil_data:
-        count_batch.add(phil, endpoint_id=endpoint, function_id=fxid_count_ints)
+    for json_data in json_data_list:
+        count_batch.add(json_data, endpoint_id=endpoint, function_id=fxid_count_ints)
     count_job = fxc.batch_run(count_batch)
     count_results = wait_batch(fxc, count_job)
 

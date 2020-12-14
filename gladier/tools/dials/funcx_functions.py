@@ -99,16 +99,8 @@ def funcx_stills_process(data):
     run_dir = "/".join(data['input_files'].split("/")[:-1])
     exp_name = data['input_files'].split("/")[-1].split("_")[0]
 
-    if 'suffix' in data:
-        suffix = data['suffix']
-    else:
-        suffix = None
-
-    if 'temp_directory' in data:
-        temp_directory = data["temp_directory"]
-    else:
-        temp_directory = run_dir
-
+    suffix = data.get('suffix', None)
+    temp_directory = data.get('temp_directory', run_dir)
     process_dir = append_suffix(f'{run_dir}/{exp_name}_processing', suffix)
     tmp_run_dir = append_suffix(f'{temp_directory}/{exp_name}', suffix)
     tmp_process_dir = append_suffix(f'{temp_directory}/{exp_name}/{exp_name}_processing', suffix)
@@ -327,9 +319,10 @@ def funcx_count_ints(data):
 
     beamx = data['beamx']
     beamy = data['beamy']
+    suffix = data.get('suffix', '')
     run_dir = "/".join(data['input_files'].split("/")[:-1])
     experiment_name = data['input_files'].split("/")[-1].split("_")[0]
-    process_dir = f'{run_dir}/{experiment_name}_processing_' + data['random_str']
+    process_dir = f'{run_dir}/{experiment_name}_processing_' + suffix
 
     int_files = glob.glob(f"{process_dir}/int-*.pickle")
     num_int_files = len(int_files)
