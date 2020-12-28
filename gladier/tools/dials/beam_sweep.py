@@ -9,13 +9,20 @@ import numpy as np
 import os
 import pandas as pd
 import seaborn as sb
+import sys
 import time
 import tempfile
 
 from configobj import ConfigObj
+from itertools import islice
 from time import sleep
 from funcx.sdk.client import FuncXClient
 from funcx_functions import funcx_create_phil, funcx_stills_process, funcx_count_ints
+
+
+def grouper(iterable, n, fillvalue=None):
+    args = [iter(iterable)] * n
+    return list(zip_longest(*args, fillvalue=fillvalue))
 
 
 def get_random_str():
@@ -89,6 +96,27 @@ def plot(df, output="ints.png"):
     plt.savefig(output, bbox_inches='tight', dpi=100)
 
 
+def expand_files(s):
+    if not all(char in s for char in ['{', '}', '..']):
+        return s
+    start = s.index('{') + 1
+    end = s.index('}', start)
+    prefix = s[:start - 1]
+    min_value, max_value = s[start:end].split("..")
+    cbf_nums = list(range(int(min_value), int(max_value)+1))
+    results = list()
+    for num in cbf_nums:
+        results.append(prefix + str(num).zfill(5) + s[end+1:])
+    return results
+
+
+def grouper(file_list, size):
+    file_list = iter(file_list)
+    result = iter(lambda: tuple(islice(file_list, size)), ())
+    result = [list(ele) for ele in result]
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
@@ -101,25 +129,24 @@ def main():
     delta = args.delta
     span = args.span
     span_half = span / 2
-
     with open(args.config) as config_json:
         config = json.load(config_json)
         beamx = float(config['beamx'])
         beamy = float(config['beamy'])
         endpoint = config['endpoint']
-
     x_values = np.round(np.arange(beamx - span_half, beamx + span_half + delta, delta), decimals=significant_digits)
     y_values = np.round(np.arange(beamy - span_half, beamy + span_half + delta, delta), decimals=significant_digits)
+    nproc = config.get('nproc', 1)
     json_data_list = list()
 
     for x in x_values:
         for y in y_values:
             new_config = copy.deepcopy(config)
+            new_config['suffix'] = get_random_str()
             new_config['beamx'] = x
             new_config['beamy'] = y
-            new_config['suffix'] = get_random_str()
             json_data_list.append(new_config)
-
+  
     fxc = FuncXClient()
     fxc.throttling_enabled = False
     fxid_create_phil, fxid_stills_process, fxid_count_ints = get_function_ids(fxc)

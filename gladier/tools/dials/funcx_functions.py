@@ -4,8 +4,9 @@ def funcx_create_phil(data):
     import os
     from string import Template
 
-    run_num = data['input_files'].split("/")[-1].split("_")[1]
-    run_dir = "/".join(data['input_files'].split("/")[:-1])
+    first_file = data['input_files'].split()[0]
+    run_num = os.path.basename(first_file).split("_")[1]
+    run_dir = os.path.dirname(first_file)
 
     if 'suffix' in data:
         phil_name = f"{run_dir}/process_{run_num}_{data['suffix']}.phil"
@@ -39,7 +40,6 @@ def funcx_create_phil(data):
 
     template_data = {'det_distance': det_distance,
                      'unit_cell': unit_cell,
-                     'nproc': data['nproc'],
                      'space_group': space_group,
                      'beamx': data['beamx'],
                      'beamy': data['beamy'],
@@ -53,7 +53,7 @@ significance_filter.enable=True
 
 #significance_filter.isigi_cutoff=1.0
 
-mp.nproc = $nproc
+mp.nproc = 1
 mp.method=multiprocessing
 
 refinement.parameterisation.detector.fix=none
@@ -95,10 +95,10 @@ def funcx_stills_process(data):
         else:
             return string
 
-    # change to the process dir
-    run_dir = "/".join(data['input_files'].split("/")[:-1])
-    exp_name = data['input_files'].split("/")[-1].split("_")[0]
-
+    first_file = data['input_files'].split()[0]
+    run_dir = os.path.dirname(first_file)
+    exp_name = os.path.basename(first_file).split("_")[0]
+    nproc = data.get('nproc', 1)
     suffix = data.get('suffix', None)
     temp_directory = data.get('temp_directory', run_dir)
     process_dir = append_suffix(f'{run_dir}/{exp_name}_processing', suffix)
@@ -109,7 +109,7 @@ def funcx_stills_process(data):
         os.makedirs(directory, exist_ok=True)
 
     try:
-        run_num = data['input_files'].split("_")[1]
+        run_num = first_file.split("_")[1]
         phil_file_tmp = append_suffix(f"{tmp_run_dir}/process_{run_num}", suffix) + ".phil"
         phil_file_run = append_suffix(f'{run_dir}/process_{run_num}', suffix) + ".phil"
 
@@ -136,9 +136,9 @@ def funcx_stills_process(data):
 
     if "timeout" in data:
         timeout = data["timeout"]
-        cmd = f'source {dials_directory}/dials_env.sh; timeout {timeout} dials.stills_process {phil_file_run} {input_files} > log-{file_end}.txt'
+        cmd = f'source {dials_directory}/dials_env.sh; parallel -j{nproc} --timeout {timeout} --joblog joblog.txt dials.stills_process {phil_file_run} ::: {input_files} > log-{file_end}.txt 2>&1'
     else:
-        cmd = f'source {dials_directory}/dials_env.sh; dials.stills_process {phil_file_run} {input_files} > log-{file_end}.txt'
+        cmd = f'source {dials_directory}/dials_env.sh; parallel -j{nproc} --joblog joblog.txt dials.stills_process {phil_file_run} ::: {input_files} > log-{file_end}.txt 2>&1'
 
     with open('cmd.txt', 'w') as fp:
         fp.write(cmd)
