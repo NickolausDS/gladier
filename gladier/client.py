@@ -509,7 +509,7 @@ class GladierBaseClient(object):
                 raise gladier.exc.ConfigException(
                     f'{tool} requires flow input value: "{req_input}"')
 
-    def run_flow(self, flow_input=None, use_defaults=True):
+    def run_flow(self, flow_input=None, use_defaults=True, flow_kwargs=None):
         """
         Start a Globus Automate flow. Flows and Functions must be registered prior or
         self.auto_registration must be True.
@@ -525,6 +525,9 @@ class GladierBaseClient(object):
         :param use_defaults: Use the result of self.get_input() to populate base input for the
                              flow. All conflicting input provided by flow_input overrides
                              values set in use_defaults.
+        :param flow_kwargs: A dict of any additional arguments to pass to the flows client. See
+                            a full list of options here:
+                            https://globus-automate-client.readthedocs.io/en/latest/python_sdk_reference.html#globus_automate_client.flows_client.FlowsClient.run_flow  # noqa
         :raise: gladier.exc.ConfigException by self.check_input()
         :raises: gladier.exc.FlowObsolete
         :raises: gladier.exc.NoFlowRegistered
@@ -533,6 +536,7 @@ class GladierBaseClient(object):
         :raises: gladier.exc.AuthException
         :raises: Any globus_sdk.exc.BaseException
         """
+        # Check flow input
         combine_flow_input = self.get_input() if use_defaults else dict()
         if flow_input is not None:
             if not flow_input.get('input') or len(flow_input.keys()) != 1:
@@ -557,16 +561,20 @@ class GladierBaseClient(object):
                 raise gladier.exc.AuthException(
                     f'Need {self.missing_authorizers} to run flow!', self.missing_authorizers)
 
-        flow_permissions = {
+        # Set permissions
+        f_kwargs = {
             p_type: self.get_flow_permission(p_type)
             for p_type in ['manage_by', 'monitor_by']
             if self.get_flow_permission(p_type)
         }
-        log.debug(f'Flow run permissions set to: {flow_permissions or "Flows defaults"}')
+        log.debug(f'Flow run permissions set to: {f_kwargs or "Flows defaults"}')
+        f_kwargs['label'] = self.get_label(combine_flow_input)
+        # Any permissions previously set on the flows arguments can be overridden.
+        f_kwargs.update(flow_kwargs or dict())
         cfg_sec = self.get_section(private=True)
         try:
             flow = self.flows_client.run_flow(flow_id, cfg_sec['flow_scope'],
-                                              combine_flow_input, **flow_permissions).data
+                                              combine_flow_input, **f_kwargs).data
         except globus_sdk.exc.GlobusAPIError as gapie:
             log.debug('Encountered error when running flow', exc_info=True)
             automate_error_message = json.loads(gapie.message)
@@ -576,7 +584,7 @@ class GladierBaseClient(object):
                     log.info('Initiating new login for dependent scope change')
                     self.login(requested_scopes=[cfg_sec['flow_scope']], force=True)
                     flow = self.flows_client.run_flow(flow_id, cfg_sec['flow_scope'],
-                                                      combine_flow_input, **flow_permissions).data
+                                                      combine_flow_input, **f_kwargs).data
                 else:
                     raise gladier.exc.AuthException('Scope change for flow, re-auth required',
                                                     missing_scopes=(cfg_sec['flow_scope'],))
@@ -588,6 +596,18 @@ class GladierBaseClient(object):
         if flow['status'] == 'FAILED':
             raise gladier.exc.ConfigException(f'Flow Failed: {flow["details"]["description"]}')
         return flow
+
+    def get_label(self, flow_input):
+        """
+        Get a label for the current flow run. The label will be listed as the main text
+        on https://app.globus.org/flows/activity.
+        """
+        cfg = self.get_cfg()
+        run_number = int(cfg[self.section].get('run_number', 0)) + 1
+        cfg[self.section]['run_number'] = str(run_number)
+        cfg.save()
+
+        return f'{self.__class__.__name__} Run No. {run_number}'
 
     def get_status(self, action_id):
         """
