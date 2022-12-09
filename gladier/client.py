@@ -166,6 +166,21 @@ class GladierBaseClient(object):
         """
         return self.login_manager.missing_authorizers
 
+    def login(self):
+        """Login to Globus Auth to enable deploying/running flows. Explicitly triggering
+        a login flow will cause Gladier to request scopes for any missing Globus Services,
+        and may do nothing if scopes are already satisfied.
+
+        Some items like a Flow scope may not be available and require an additional login.
+        Additional logins may also be triggered automatically.
+
+        The exact behavior of logins is dependent on the login manager set on this class.
+        Default behavior will trigger a minimal number of logins on-demand when scopes are
+        needed or dependent scopes underlying the flow scope change and require reauthentication.
+        """
+        missing_scopes = self.login_manager.get_missing_authorizers()
+        return self.login_manager.login(scopes=missing_scopes)
+
     def logout(self):
         """Log out and revoke this client's tokens. This object will no longer
         be usable until a new login is called.
