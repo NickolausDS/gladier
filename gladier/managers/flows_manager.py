@@ -88,6 +88,7 @@ class FlowsManager(ServiceManager):
         flow_title: t.Optional[str] = None,
         subscription_id: t.Optional[str] = None,
         globus_group: t.Optional[str] = None,
+        dependent_scopes: t.Optional[list] = None,
         on_change: t.Optional[t.Callable] = ensure_flow_registered,
         redeploy_on_404: bool = True,
         **kwargs,
@@ -98,6 +99,7 @@ class FlowsManager(ServiceManager):
         self.flow_title = flow_title
         self.subscription_id = subscription_id
         self.globus_group = globus_group
+        self.dependent_scopes = dependent_scopes or list()
         self.on_change = on_change or (lambda self, exc: None)
         self.redeploy_on_404 = redeploy_on_404
 
@@ -111,11 +113,14 @@ class FlowsManager(ServiceManager):
         scopes = self.AVAILABLE_SCOPES.copy()
         flow_scope = self.flow_scope
         if flow_scope:
+            for additional_scope in self.dependent_scopes:
+                log.debug(f"Adding dependent flow scope: {additional_scope}")
+                flow_scope.add_dependency(additional_scope)
             scopes.append(flow_scope)
         return scopes
 
     @property
-    def flow_scope(self):
+    def flow_scope(self) -> t.Union[str, globus_sdk.scopes.MutableScope]:
         """Get the scope for a flow
         :returns: None if no flow id exists"""
         try:
@@ -126,9 +131,7 @@ class FlowsManager(ServiceManager):
             flow_id = None
         if flow_id:
             # In the future, this should be gettable via
-            # globus_sdk.SpecificFlowClient(flow_id).scopes.url_scope_string('flow_id'))
-            scope_name = f'flow_{flow_id.replace("-", "_")}_user'
-            return f"https://auth.globus.org/scopes/{flow_id}/{scope_name}"
+            return globus_sdk.SpecificFlowClient(flow_id).scopes.make_mutable("user")
 
     @property
     def flow_definition(self) -> dict:
@@ -170,7 +173,10 @@ class FlowsManager(ServiceManager):
         if getattr(self, "_specific_flow_client", None) is not None:
             return self._specific_flow_client
         authorizers = self.login_manager.get_manager_authorizers()
-        flow_authorizer = authorizers.get(self.flow_scope)
+        flow_authorizer = authorizers.get(str(self.flow_scope))
+
+        # if not flow_authorizer:
+        #     raise ValueError(f"No authorizer for {self.flow_scope}. Has a login happened yet?")
 
         self._specific_flow_client = globus_sdk.SpecificFlowClient(
             self.get_flow_id(), authorizer=flow_authorizer

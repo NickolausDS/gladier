@@ -10,6 +10,7 @@ from globus_sdk import (
     RefreshTokenAuthorizer,
     ConfidentialAppAuthClient,
 )
+from globus_sdk.scopes import MutableScope
 from gladier.exc import AuthException
 from gladier.storage.tokens import GladierSecretsConfig
 
@@ -29,17 +30,51 @@ class BaseLoginManager(abc.ABC):
     def missing_authorizers(self) -> Set[str]:
         return self.get_missing_authorizers(self.get_authorizers())
 
+    def normalize_scopes(self, scopes: List[Any]) -> List[str]:
+        """
+        Reduce any scopes with dynamic dependencies into their base string values. Coerces all scopes
+        to strings if they are of MutableScope types. Raises errors if strings with dynamic dependencies
+        are detected (contains "["]), since those are not yet parsable.
+
+        This is useful due to a general mismatch in Globus Auth which usually doesn't show dynamic dependencies
+        in scopes, instead only showing them when passed as requested scopes. Tokens are never returned from Globus Auth
+        (at least not yet) with what dependecies they have, and there isn't support for saving dependencies either, so
+        this is a useful way to derive "base" scopes to compare them with one another.
+        """
+        normalized = []
+        for scope in scopes:
+            if isinstance(scope, str):
+                if "[" in scope:
+                    raise ValueError(
+                        "Unable to normalize scope {scope}, please build your scopes "
+                        "using helper classes here:"
+                        "https://globus-sdk-python.readthedocs.io/en/stable/scopes.html#dynamic-scope-construction"
+                    )
+                normalized.append(scope)
+            elif isinstance(scope, MutableScope):
+                normalized.append(scope.scope_string)
+            else:
+                # TODO: Find all other junk which can be passed as a requested_scope
+                raise ValueError(
+                    f"Unexpected Scope Type detected: ({type(scope)}) {scope}"
+                )
+        return normalized
+
     def get_missing_authorizers(
         self,
         authorizers: AUTHORIZER_MAP,
     ) -> Set[str]:
         # Disregard any scopes not in the 'required' list. This allows implementers to return
-        # unrelated scopes.
-        absent = self.required_scopes.difference(authorizers)
+        # unrelated scopes. Make sure we only compare normalized scope strings with one another
+        # (And not scopes with dependencies)
+        required_scopes_n = set(self.normalize_scopes(self.required_scopes))
+        scopes_map = dict(zip(required_scopes_n, self.required_scopes))
+        absent = required_scopes_n.difference(authorizers)
+        absent_complete = set([scopes_map[s] for s in absent])
         log.info(
-            f"Scopes Absent: {absent or None}, Need Update: {self.scope_changes or None}"
+            f"Scopes Absent: {absent_complete or None}, Need Update: {self.scope_changes or None}"
         )
-        return absent | self.scope_changes
+        return absent_complete | self.scope_changes
 
     def get_manager_authorizers(self) -> AUTHORIZER_MAP:
         """
