@@ -8,15 +8,17 @@ class GladierBaseTool(object):
     """Gladier Defaults defines a common method of tying together
     flows, compute-functions, and default inputs for starting a flow."""
 
-    flow_definition = None
-    flow_input = dict()
-    flow_transition_states = []
-    required_input = []
-    alias_exempt = ["compute_endpoint"]
-    compute_endpoints = dict()
-    compute_functions = []
+    flow_definition: Optional[Dict[str, Dict]] = None
+    flow_input: Dict[Any, Any] = dict()
+    flow_transition_states: List[str] = []
+    required_input: List[str] = []
+    alias_exempt: List[str] = ["compute_endpoint"]
+    compute_endpoints: List[str] = []
+    compute_functions: List[str] = []
 
-    def __init__(self, alias: str = None, alias_class: ToolAlias = None):
+    def __init__(
+        self, alias: Optional[str] = None, alias_class: Optional[ToolAlias] = None
+    ):
         self.alias = alias
         alias_cls = alias_class
         if alias and not alias_class:

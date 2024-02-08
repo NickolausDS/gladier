@@ -50,6 +50,58 @@ class FlowsManager(ServiceManager):
                             at runtime when used with a Gladier Client
     :param flow_schema: The schema to be used alongside the flow definition
     :param flow_title: The title for the Globus Flow
+    :param subtitle: Subtitle for a flow
+    :param description: Description for a flow
+    :param flow_owners: A given set of URN identities for owners of a flow.
+
+                         Example:
+
+                            .. code-block:: python
+
+                                [
+                                    "urn:globus:auth:identity:b44bddda-d274-11e5-978a-9f15789a8150",
+                                    "urn:globus:groups:id:c1dcd951-3f35-4ea3-9f28-a7cdeaf8b68f"
+                                ]
+
+                        All identities above will be granted that role access.
+    :param flow_viewers: A given set of URN identities that can view flows.
+
+                         Example:
+
+                            .. code-block:: python
+
+                                [
+                                    "urn:globus:auth:identity:b44bddda-d274-11e5-978a-9f15789a8150",
+                                    "urn:globus:groups:id:c1dcd951-3f35-4ea3-9f28-a7cdeaf8b68f"
+                                ]
+
+                        All identities above will be granted that role access.
+    :param flow_starters: A given set of URN identities that can start flows but not manage them.
+
+                         Example:
+
+                            .. code-block:: python
+
+                                [
+                                    "urn:globus:auth:identity:b44bddda-d274-11e5-978a-9f15789a8150",
+                                    "urn:globus:groups:id:c1dcd951-3f35-4ea3-9f28-a7cdeaf8b68f"
+                                ]
+
+                        All identities above will be granted that role access.
+    :param flow_administrators: A given set of URN identities for flow administrators.
+
+                         Example:
+
+                            .. code-block:: python
+
+                                [
+                                    "urn:globus:auth:identity:b44bddda-d274-11e5-978a-9f15789a8150",
+                                    "urn:globus:groups:id:c1dcd951-3f35-4ea3-9f28-a7cdeaf8b68f"
+                                ]
+
+                        All identities above will be granted that role access.
+    :param keywords: t.Optional[list] = None,
+    :param additional_fields: t.Optional[list] = None,
     :param globus_group: A Globus Group UUID. Used to grant all flow and run permissions
     :param on_change: callback on checksum mismatch or missing flow id. Default registers/deploys
                       flow, ``None`` takes no action and attempts to run "obselete" flows.
@@ -76,6 +128,23 @@ class FlowsManager(ServiceManager):
         globus_sdk.FlowsClient.scopes.run_status,
         globus_sdk.FlowsClient.scopes.run_manage,
     ]
+    FLOW_CREATE_FIELDS = [
+        "subtitle",
+        "description",
+        "flow_viewers",
+        "flow_starters",
+        "flow_administrators",
+        "keywords",
+        "additional_fields",
+    ]
+    FLOW_UPDATE_FIELDS = FLOW_CREATE_FIELDS + ["flow_owners"]
+    FLOW_PERMISSION_TYPES = [
+        "flow_viewers",
+        "flow_starters",
+        "flow_administrators",
+        "run_managers",
+        "run_monitors",
+    ]
 
     def __init__(
         self,
@@ -83,6 +152,14 @@ class FlowsManager(ServiceManager):
         flow_definition: t.Optional[dict] = None,
         flow_schema: t.Optional[dict] = None,
         flow_title: t.Optional[str] = None,
+        subtitle: t.Optional[str] = None,
+        description: t.Optional[str] = None,
+        flow_owners: t.Optional[list] = None,
+        flow_viewers: t.Optional[list] = None,
+        flow_starters: t.Optional[list] = None,
+        flow_administrators: t.Optional[list] = None,
+        keywords: t.Optional[list] = None,
+        additional_fields: t.Optional[list] = None,
         globus_group: t.Optional[str] = None,
         on_change: t.Optional[t.Callable] = ensure_flow_registered,
         redeploy_on_404: bool = True,
@@ -92,6 +169,14 @@ class FlowsManager(ServiceManager):
         self.flow_definition = flow_definition
         self.flow_schema = flow_schema
         self.flow_title = flow_title
+        self.subtitle = subtitle
+        self.description = description
+        self.flow_owners = flow_owners or list()
+        self.flow_viewers = flow_viewers or list()
+        self.flow_starters = flow_starters or list()
+        self.flow_administrators = flow_administrators or list()
+        self.keywords = keywords or list()
+        self.additional_fields = additional_fields or list()
         self.globus_group = globus_group
         self.on_change = on_change or (lambda self, exc: None)
         self.redeploy_on_404 = redeploy_on_404
@@ -181,8 +266,7 @@ class FlowsManager(ServiceManager):
         self._specific_flow_client = None
         return self.specific_flow_client
 
-    @staticmethod
-    def get_flow_checksum(flow_definition, flow_schema):
+    def get_flow_checksum(self, flow_definition, flow_schema):
         """
         Get the SHA256 checksum of the current flow definition.
 
@@ -191,7 +275,8 @@ class FlowsManager(ServiceManager):
 
         flow_def = json.dumps(flow_definition, sort_keys=True)
         flow_schema = json.dumps(flow_schema, sort_keys=True)
-        data = (flow_def + flow_schema).encode()
+        fields = str(str(getattr(self, f, "")) for f in self.FLOW_UPDATE_FIELDS)
+        data = (flow_def + flow_schema + fields).encode()
         return hashlib.sha256(data).hexdigest()
 
     @staticmethod
@@ -224,16 +309,9 @@ class FlowsManager(ServiceManager):
         """
         if identities is None and self.globus_group:
             identities = [self.get_globus_urn(self.globus_group)]
-        permission_types = {
-            "flow_viewers",
-            "flow_starters",
-            "flow_administrators",
-            "run_managers",
-            "run_monitors",
-        }
-        if permission_type not in permission_types:
+        if permission_type not in self.FLOW_PERMISSION_TYPES:
             raise gladier.exc.DevelopmentException(
-                f"permission_type must be one of " f"{permission_types}"
+                f"permission_type must be one of " f"{self.FLOW_PERMISSION_TYPES}"
             )
         return identities
 
@@ -313,22 +391,25 @@ class FlowsManager(ServiceManager):
         :return: an automate flow UUID
         """
         flow_id = self.get_flow_id()
+        c_permissions = [
+            f for f in self.FLOW_CREATE_FIELDS if f in self.FLOW_PERMISSION_TYPES
+        ]
         flow_permissions = {
-            p_type: self.get_flow_permission(p_type)
-            for p_type in ["flow_viewers", "flow_starters", "flow_administrators"]
-            if self.get_flow_permission(p_type)
+            p: self.get_flow_permission(p) + getattr(self, p)
+            for p in c_permissions
+            if self.get_flow_permission(p)
         }
         log.debug(f'Flow permissions set to: {flow_permissions or "Flows defaults"}')
         flow_kwargs = flow_permissions
         # Input schema is a required field and must be part of all flows.
-        flow_kwargs["input_schema"] = self.flow_schema
         if flow_id:
             try:
                 log.info(f"Flow checksum failed, updating flow {flow_id}...")
+                flow_kwargs.update(
+                    {f: getattr(self, f) for f in self.FLOW_UPDATE_FIELDS}
+                )
                 self.flows_client.update_flow(
                     flow_id,
-                    title=self.flow_title,
-                    definition=self.flow_definition,
                     **flow_kwargs,
                 )
                 self.storage.set_value(
@@ -342,6 +423,7 @@ class FlowsManager(ServiceManager):
                     raise
         if flow_id is None:
             log.info("No flow detected, deploying new flow...")
+            flow_kwargs.update({f: getattr(self, f) for f in self.FLOW_CREATE_FIELDS})
             flow = self.flows_client.create_flow(
                 self.flow_title, self.flow_definition, **flow_kwargs
             ).data
